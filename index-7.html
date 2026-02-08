@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>England Swingometer (PCON13)</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#0f1620; --text:#e6edf3; --muted:#9aa4b2; --line:#243041;
+      --lab:#e31b23; --con:#1976d2; --ref:#7c3aed; --ld:#f59e0b; --grn:#22c55e; --unk:#64748b;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 14px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    html,body{height:100%; background:var(--bg); color:var(--text); margin:0; font-family:var(--sans);}
+    .app{display:grid; grid-template-columns: 360px 1fr; gap:14px; padding:14px; height:100%; box-sizing:border-box;}
+    .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);}
+    .left{display:flex; flex-direction:column; overflow:hidden;}
+    .header{padding:14px 14px 10px; border-bottom:1px solid var(--line);}
+    .title{font-size:16px; font-weight:650; letter-spacing:.2px;}
+    .subtitle{font-size:12px; color:var(--muted); margin-top:4px; line-height:1.25;}
+    .body{padding:12px 14px 14px; overflow:auto;}
+    .row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:10px 0;}
+    .row label{font-size:13px; color:var(--text);}
+    .row input[type="number"]{
+      width:120px; padding:8px 10px; border-radius:10px; border:1px solid var(--line);
+      background:#0b1119; color:var(--text); font-family:var(--mono);
+    }
+    .btns{display:flex; gap:10px; margin-top:10px;}
+    button{
+      flex:1; border:1px solid var(--line); background:#0b1119; color:var(--text);
+      padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:600;
+    }
+    button:hover{filter:brightness(1.08);}
+    button.primary{background:#162236;}
+    .statline{margin-top:10px; font-size:12px; color:var(--muted); line-height:1.35;}
+    .pill{display:inline-flex; gap:8px; align-items:center; padding:4px 8px; border-radius:999px; border:1px solid var(--line); background:#0b1119; font-family:var(--mono); font-size:11px;}
+    .dot{width:10px; height:10px; border-radius:3px; display:inline-block;}
+    .gridlegend{display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;}
+    .mapwrap{position:relative; overflow:hidden;}
+    #map{width:100%; height:100%;}
+    .topbar{
+      position:absolute; left:14px; top:14px; right:14px; display:flex; gap:10px; align-items:flex-start; pointer-events:none;
+    }
+    .card{
+      pointer-events:auto;
+      background:rgba(15,22,32,.92); border:1px solid var(--line); border-radius:14px; padding:10px 12px;
+      backdrop-filter: blur(6px);
+    }
+    .card h3{margin:0 0 8px; font-size:13px; font-weight:700;}
+    .seats{display:grid; grid-template-columns: 1fr auto; gap:6px 10px; font-family:var(--mono); font-size:12px;}
+    .seats .p{display:flex; align-items:center; gap:8px;}
+    .hint{font-size:12px; color:var(--muted); margin-top:8px; line-height:1.25;}
+    .tooltip{
+      position:absolute; pointer-events:none; background:rgba(10,15,20,.95); border:1px solid var(--line);
+      color:var(--text); padding:10px 12px; border-radius:12px; font-size:12px; min-width:220px;
+      transform: translate(12px, 12px);
+      box-shadow: var(--shadow);
+      opacity:0;
+    }
+    .tt-title{font-weight:700; margin-bottom:6px;}
+    .tt-win{font-family:var(--mono); font-size:12px; margin-bottom:6px; color:var(--muted);}
+    .tt-grid{display:grid; grid-template-columns: 1fr auto; gap:4px 10px; font-family:var(--mono); font-size:12px;}
+    .small{font-size:11px; color:var(--muted);}
+    .footer{
+      margin-top:12px; padding-top:10px; border-top:1px solid var(--line);
+      font-size:11px; color:var(--muted); line-height:1.35;
+    }
+    .warn{color:#fbbf24;}
+    @media (max-width: 980px){
+      .app{grid-template-columns: 1fr; grid-template-rows: auto 1fr;}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel left">
+      <div class="header">
+        <div class="title">England election swingometer (PCON13)</div>
+        <div class="subtitle">
+          Loads <span class="pill">uk.topoJSON.txt</span> and (optionally) <span class="pill">ratios.tsv</span>.
+          Seat winner per constituency = argmax over parties of (national_share × constituency_ratio), then renormalized.
+        </div>
+      </div>
+      <div class="body">
+        <div class="row"><label for="lab">Labour (%)</label><input id="lab" type="number" step="0.1" min="0" value="35.0"></div>
+        <div class="row"><label for="con">Conservative (%)</label><input id="con" type="number" step="0.1" min="0" value="25.0"></div>
+        <div class="row"><label for="ref">Reform (%)</label><input id="ref" type="number" step="0.1" min="0" value="12.0"></div>
+        <div class="row"><label for="ld">Lib Dem (%)</label><input id="ld" type="number" step="0.1" min="0" value="15.0"></div>
+        <div class="row"><label for="grn">Green (%)</label><input id="grn" type="number" step="0.1" min="0" value="6.0"></div>
+
+        <div class="btns">
+          <button id="normalizeBtn" class="primary" type="button">Normalize → 100</button>
+          <button id="applyBtn" type="button">Apply</button>
+        </div>
+
+        <div class="statline" id="sumLine"></div>
+
+        <div class="gridlegend">
+          <div class="pill"><span class="dot" style="background:var(--lab)"></span>Lab</div>
+          <div class="pill"><span class="dot" style="background:var(--con)"></span>Con</div>
+          <div class="pill"><span class="dot" style="background:var(--ref)"></span>Ref</div>
+          <div class="pill"><span class="dot" style="background:var(--ld)"></span>LD</div>
+          <div class="pill"><span class="dot" style="background:var(--grn)"></span>Green</div>
+          <div class="pill"><span class="dot" style="background:var(--unk)"></span>Unknown</div>
+        </div>
+
+        <div class="footer">
+          <div><span class="warn">If you see lots of Unknown:</span> put your full ratio table in <span class="pill">ratios.tsv</span> in the same folder as this HTML.</div>
+          <div class="small">Format: Constituency[TAB]Lab[TAB]Con[TAB]Ref[TAB]LD[TAB]Green. Header row allowed.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel mapwrap">
+      <svg id="map" aria-label="Constituency map"></svg>
+      <div class="topbar">
+        <div class="card" style="min-width: 260px;">
+          <h3>Seat totals (England)</h3>
+          <div class="seats" id="seatTable"></div>
+          <div class="hint" id="coverageLine"></div>
+          <div class="btns" style="margin-top:10px;">
+            <button id="downloadBtn" type="button">Download CSV</button>
+            <button id="resetZoomBtn" type="button">Reset zoom</button>
+          </div>
+        </div>
+      </div>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+  </div>
+
+  <!-- Dependencies (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+
+  <script>
+    // -----------------------------
+    // Configuration
+    // -----------------------------
+    const PARTY_KEYS = ["lab","con","ref","ld","grn"];
+    const PARTY_LABEL = {lab:"Lab", con:"Con", ref:"Ref", ld:"LD", grn:"Green", unk:"Unknown"};
+    const PARTY_COLOR = {
+      lab: getComputedStyle(document.documentElement).getPropertyValue("--lab").trim(),
+      con: getComputedStyle(document.documentElement).getPropertyValue("--con").trim(),
+      ref: getComputedStyle(document.documentElement).getPropertyValue("--ref").trim(),
+      ld:  getComputedStyle(document.documentElement).getPropertyValue("--ld").trim(),
+      grn: getComputedStyle(document.documentElement).getPropertyValue("--grn").trim(),
+      unk: getComputedStyle(document.documentElement).getPropertyValue("--unk").trim(),
+    };
+
+    // If ratios.tsv is missing, you can paste a few lines here (optional).
+    // Keep it empty by default; page will still render but with Unknown winners.
+    const RATIOS_FALLBACK_TSV = ``;
+
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    const $ = (id) => document.getElementById(id);
+
+    function clampNonNeg(x){ return (isFinite(x) && x > 0) ? x : 0; }
+
+    function getNational(){
+      const v = {
+        lab: clampNonNeg(parseFloat($("lab").value)),
+        con: clampNonNeg(parseFloat($("con").value)),
+        ref: clampNonNeg(parseFloat($("ref").value)),
+        ld:  clampNonNeg(parseFloat($("ld").value)),
+        grn: clampNonNeg(parseFloat($("grn").value)),
+      };
+      return v;
+    }
+
+    function setNational(v){
+      $("lab").value = v.lab.toFixed(1);
+      $("con").value = v.con.toFixed(1);
+      $("ref").value = v.ref.toFixed(1);
+      $("ld").value  = v.ld.toFixed(1);
+      $("grn").value = v.grn.toFixed(1);
+      updateSumLine();
+    }
+
+    function sumNational(v){ return PARTY_KEYS.reduce((a,k)=>a+v[k], 0); }
+
+    function normalizeTo100(v){
+      const s = sumNational(v);
+      if (s <= 0) return v;
+      const out = {};
+      for (const k of PARTY_KEYS) out[k] = 100 * (v[k] / s);
+      return out;
+    }
+
+    function updateSumLine(){
+      const v = getNational();
+      const s = sumNational(v);
+      const ok = Math.abs(s-100) < 0.01;
+      $("sumLine").innerHTML = ok
+        ? `Sum: <span class="pill">${s.toFixed(1)}%</span>`
+        : `Sum: <span class="pill">${s.toFixed(1)}%</span> <span class="warn">(not 100)</span>`;
+    }
+
+    // Name normalization to align ratios table vs topojson names.
+    function normName(s){
+      return String(s || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[’'`]/g, "")
+        .replace(/[\.,:;()\-]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function parseRatiosTSV(text){
+      const map = new Map();
+      const lines = String(text || "").split(/\r?\n/);
+      for (const raw of lines){
+        const line = raw.trim();
+        if (!line) continue;
+
+        // Split on tabs if present, otherwise on 2+ spaces, otherwise commas.
+        let parts;
+        if (line.includes("\t")) parts = line.split("\t");
+        else if (/  +/.test(line)) parts = line.split(/ {2,}/);
+        else parts = line.split(",");
+
+        parts = parts.map(s => s.trim()).filter(Boolean);
+        if (parts.length < 6) continue;
+
+        // Robust: constituency name may contain spaces; take last 5 tokens as numbers.
+        const tail = parts.slice(-5);
+        const nums = tail.map(x => parseFloat(x));
+        if (nums.some(x => !isFinite(x))) continue; // skip header / junk
+
+        const name = parts.slice(0, -5).join(" ").trim();
+        if (!name) continue;
+
+        map.set(normName(name), {lab:nums[0], con:nums[1], ref:nums[2], ld:nums[3], grn:nums[4]});
+      }
+      return map;
+    }
+
+    function computeSeat(feature, national, ratios){
+      if (!ratios) return {winner:"unk", shares:null, scores:null};
+
+      const scores = {};
+      let tot = 0;
+      for (const k of PARTY_KEYS){
+        const s = clampNonNeg(national[k]) * clampNonNeg(ratios[k]);
+        scores[k] = s;
+        tot += s;
+      }
+      if (tot <= 0) return {winner:"unk", shares:null, scores};
+
+      const shares = {};
+      for (const k of PARTY_KEYS) shares[k] = 100 * (scores[k] / tot);
+
+      let winner = "lab";
+      for (const k of PARTY_KEYS){
+        if (shares[k] > shares[winner]) winner = k;
+      }
+      return {winner, shares, scores};
+    }
+
+    function seatsToCSV(features){
+      const cols = ["PCON13CD","PCON13NM","winner","Lab","Con","Ref","LD","Green"];
+      const rows = [cols.join(",")];
+      for (const f of features){
+        const p = f.properties || {};
+        const pred = p.__pred || {winner:"unk", shares:null};
+        const sh = pred.shares || {};
+        const row = [
+          q(p.PCON13CD), q(p.PCON13NM), q(pred.winner),
+          num(sh.lab), num(sh.con), num(sh.ref), num(sh.ld), num(sh.grn)
+        ];
+        rows.push(row.join(","));
+      }
+      return rows.join("\n");
+
+      function q(x){
+        const s = String(x ?? "");
+        return `"${s.replaceAll('"','""')}"`;
+      }
+      function num(x){
+        return isFinite(x) ? x.toFixed(3) : "";
+      }
+    }
+
+    // -----------------------------
+    // App state
+    // -----------------------------
+    let englandFeatures = [];
+    let ratiosByName = new Map();
+
+    // -----------------------------
+    // Load data
+    // -----------------------------
+    async function loadAll(){
+      updateSumLine();
+
+      // 1) topojson
+      const topo = await fetch("uk.topoJSON.txt").then(r => {
+        if (!r.ok) throw new Error("Failed to load uk.topoJSON.txt");
+        return r.json();
+      });
+
+      // Find an object key (default: wpc)
+      const objKey = topo.objects && (topo.objects.wpc ? "wpc" : Object.keys(topo.objects)[0]);
+      if (!objKey) throw new Error("TopoJSON has no objects");
+
+      const geo = topojson.feature(topo, topo.objects[objKey]);
+      const feats = geo.features || [];
+
+      // Keep England only: PCON13CD starts with "E"
+      englandFeatures = feats.filter(f => (f.properties?.PCON13CD || "").startsWith("E"));
+
+      // 2) ratios
+      ratiosByName = await loadRatios();
+
+      // 3) render
+      initMap();
+      recomputeAndRender();
+    }
+
+    async function loadRatios(){
+      try{
+        const tsv = await fetch("ratios.tsv", {cache:"no-store"}).then(r => {
+          if (!r.ok) throw new Error("no ratios.tsv");
+          return r.text();
+        });
+        const m = parseRatiosTSV(tsv);
+        if (m.size > 0) return m;
+      }catch(e){
+        // fallthrough
+      }
+
+      const m2 = parseRatiosTSV(RATIOS_FALLBACK_TSV);
+      return m2;
+    }
+
+    // -----------------------------
+    // Map rendering (D3)
+    // -----------------------------
+    let svg, g, path, projection, zoom;
+
+    function initMap(){
+      svg = d3.select("#map");
+      svg.selectAll("*").remove();
+
+      const w = svg.node().clientWidth;
+      const h = svg.node().clientHeight;
+
+      projection = d3.geoMercator();
+      path = d3.geoPath(projection);
+
+      projection.fitSize([w, h], {type:"FeatureCollection", features: englandFeatures});
+
+      g = svg.append("g");
+
+      g.selectAll("path")
+        .data(englandFeatures)
+        .enter()
+        .append("path")
+        .attr("d", path)
+        .attr("fill", PARTY_COLOR.unk)
+        .attr("stroke", "rgba(255,255,255,0.15)")
+        .attr("stroke-width", 0.6);
+
+      // Zoom/pan
+      zoom = d3.zoom()
+        .scaleExtent([1, 18])
+        .on("zoom", (event) => g.attr("transform", event.transform));
+
+      svg.call(zoom);
+
+      // Tooltip
+      const tt = $("tooltip");
+      g.selectAll("path")
+        .on("mousemove", (event, d) => {
+          const p = d.properties || {};
+          const pred = p.__pred || {winner:"unk", shares:null};
+          const sh = pred.shares;
+
+          const name = p.PCON13NM || "(unknown)";
+          const win = pred.winner || "unk";
+
+          let html = `<div class="tt-title">${escapeHtml(name)}</div>`;
+          html += `<div class="tt-win">Winner: <span class="pill"><span class="dot" style="background:${PARTY_COLOR[win]||PARTY_COLOR.unk}"></span>${PARTY_LABEL[win]||"Unknown"}</span></div>`;
+
+          if (sh){
+            html += `<div class="tt-grid">
+              <div>Lab</div><div>${sh.lab.toFixed(1)}</div>
+              <div>Con</div><div>${sh.con.toFixed(1)}</div>
+              <div>Ref</div><div>${sh.ref.toFixed(1)}</div>
+              <div>LD</div><div>${sh.ld.toFixed(1)}</div>
+              <div>Green</div><div>${sh.grn.toFixed(1)}</div>
+            </div>`;
+          } else {
+            html += `<div class="small">No ratio row matched for this constituency name.</div>`;
+          }
+
+          tt.innerHTML = html;
+          tt.style.left = event.offsetX + "px";
+          tt.style.top  = event.offsetY + "px";
+          tt.style.opacity = 1;
+        })
+        .on("mouseleave", () => {
+          const tt = $("tooltip");
+          tt.style.opacity = 0;
+        });
+
+      window.addEventListener("resize", () => {
+        const w2 = svg.node().clientWidth;
+        const h2 = svg.node().clientHeight;
+        projection.fitSize([w2, h2], {type:"FeatureCollection", features: englandFeatures});
+        g.selectAll("path").attr("d", path);
+      });
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, m => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[m]));
+    }
+
+    // -----------------------------
+    // Compute + render
+    // -----------------------------
+    function recomputeAndRender(){
+      const national = normalizeTo100(getNational());
+      setNational(national); // also updates sum line
+
+      const seatCounts = {lab:0, con:0, ref:0, ld:0, grn:0, unk:0};
+      let covered = 0;
+
+      for (const f of englandFeatures){
+        const nm = normName(f.properties?.PCON13NM);
+        const ratios = ratiosByName.get(nm);
+        if (ratios) covered++;
+
+        const pred = computeSeat(f, national, ratios);
+        f.properties.__pred = pred;
+
+        seatCounts[pred.winner] = (seatCounts[pred.winner] || 0) + 1;
+      }
+
+      // map recolor
+      g.selectAll("path")
+        .attr("fill", d => PARTY_COLOR[d.properties?.__pred?.winner || "unk"] || PARTY_COLOR.unk);
+
+      // seat table
+      const totalSeats = englandFeatures.length;
+      const seatTable = $("seatTable");
+      seatTable.innerHTML = "";
+      const order = ["lab","con","ref","ld","grn","unk"];
+      for (const k of order){
+        const divL = document.createElement("div");
+        divL.className = "p";
+        divL.innerHTML = `<span class="dot" style="background:${PARTY_COLOR[k]}"></span>${PARTY_LABEL[k]}`;
+        const divR = document.createElement("div");
+        divR.textContent = String(seatCounts[k] ?? 0);
+        seatTable.appendChild(divL);
+        seatTable.appendChild(divR);
+      }
+
+      $("coverageLine").textContent = `Coverage: ${covered}/${totalSeats} constituencies matched to ratios.tsv`;
+    }
+
+    // -----------------------------
+    // UI wiring
+    // -----------------------------
+    $("normalizeBtn").addEventListener("click", () => {
+      const v = normalizeTo100(getNational());
+      setNational(v);
+    });
+
+    $("applyBtn").addEventListener("click", () => {
+      recomputeAndRender();
+    });
+
+    for (const id of ["lab","con","ref","ld","grn"]){
+      $(id).addEventListener("input", updateSumLine);
+      $(id).addEventListener("keydown", (e) => {
+        if (e.key === "Enter") recomputeAndRender();
+      });
+    }
+
+    $("downloadBtn").addEventListener("click", () => {
+      const csv = seatsToCSV(englandFeatures);
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "england_seat_projection.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    $("resetZoomBtn").addEventListener("click", () => {
+      d3.select("#map").transition().duration(250).call(zoom.transform, d3.zoomIdentity);
+    });
+
+    // boot
+    loadAll().catch(err => {
+      console.error(err);
+      $("coverageLine").innerHTML = `<span class="warn">Error:</span> ${String(err.message || err)}`;
+    });
+  </script>
+</body>
+</html>
